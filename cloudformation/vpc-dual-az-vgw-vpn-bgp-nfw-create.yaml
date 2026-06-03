@@ -1,10 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  以 VGW 为 DX 对接模式的 NFW 演示环境。云端检测 VPC（10.87.0.0/16）部署 VGW 与 NFW，
-  并用一个独立 VPC（10.0.0.0/16，二级网段 10.132.0.0/16）模拟 IDC，二者通过 Site-to-Site VPN
-  和 BGP 协议互联并开启路由传播。模拟 IDC 内运行 strongSwan + FRR 的 EC2 充当客户网关（CGW），
-  对外通告 10.0.0.0/8 以及被检测子网 10.132.66.0/24。检测 VPC 指向 IDC 网段的路由刻意留空，
-  便于操作者对比 BGP 自动传播与指向 NFW Endpoint 的静态最长前缀路由两种方式的效果。
+  NFW demo environment with VGW as DX peering mode. The inspection VPC (10.87.0.0/16) deploys
+  VGW and NFW, while a separate VPC (10.0.0.0/16, secondary CIDR 10.132.0.0/16) simulates
+  the on-premises IDC. The two VPCs are interconnected via Site-to-Site VPN with BGP and route
+  propagation enabled. The simulated IDC runs strongSwan + FRR on an EC2 instance acting as
+  the Customer Gateway (CGW), advertising 10.0.0.0/8 and the inspected subnet 10.132.66.0/24.
+  Routes to IDC CIDRs in the inspection VPC are intentionally left empty, allowing operators
+  to compare BGP auto-propagated routes vs static longest-prefix routes pointing to NFW Endpoints.
 
 Parameters:
   KeyPairName:
