@@ -1,6 +1,6 @@
 # 使用 AWS Network Firewall 服务审查 IDC 和云上 VPC 间的流量 - VGW 架构的设计
 
-本实验搭建了一个云上 VPC 和 模拟IDC 环境的网络环境，通过开启 BGP 路由传播并手工配置高优先级路由条目，验证 IDC 和云之间的网络流量经 NFW 审查的场景。
+本实验搭建了一个云上 VPC 和 模拟 IDC 互联的网络环境，通过开启 BGP 路由传播并手工配置高优先级路由条目，验证 IDC 和云之间的网络流量经 NFW 审查的场景。
 
 全文大量使用的技术术语缩写/简称如下：
 
@@ -21,7 +21,7 @@
 | --- | --- |
 | Availability Zone | az |
 | Route Table | rt |
-| Private | pvr |
+| Private | prv |
 | Network Firewall | fw |
 
 ## 一、验证 NFW 流量审查部署环境的挑战
@@ -123,7 +123,7 @@ CFN模板创建发起到完成，中间启动多种服务，大约需要15-20分
 
 由此即可登录到 EC2 。
 
-登录 EC2 成功后，从云上 VPC 的 EC2 上，使用 ping命令/curl命令 测试连接到 模拟 IDC 的 EC2，测试连通成功。测试通过后，进入下一步 NFW 路由表的配置。
+登录 EC2 成功后，从云上 VPC 的 EC2 上，使用 ping 命令/curl 命令测试连接到 模拟 IDC 的 EC2，测试连通成功。测试通过后，进入下一步 NFW 路由表的配置。
 
 ## 三、手工配置路由将流量送给 NFW
 
