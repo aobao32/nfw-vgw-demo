@@ -405,7 +405,16 @@ Resources:
           - ResourceArn: !Ref NFWStatefulAllowAll
             Priority: 100
         StatefulDefaultActions:
-          - 'aws:drop_established'
+          # aws:drop_established_app_layer_to_server = console "Application drop
+          # established (server-directed only)". Application-layer aware default
+          # drop that only drops client->server packets of established connections
+          # not matched by a pass rule, while allowing server->client return
+          # traffic, server banners and TCP control packets. It also allows
+          # segmented TLS ClientHello / HTTP request packets until TLS.SNI /
+          # HTTP.HOST is parsed, then applies rules - which is exactly what makes
+          # domain (L7) egress filtering reliable. This is also the AWS default
+          # for newly created policies since 2026-06.
+          - 'aws:drop_established_app_layer_to_server'
         StatefulEngineOptions:
           RuleOrder: STRICT_ORDER
           # 流中断处理策略：REJECT 在丢弃后续报文的同时向客户端回送 TCP RST，
@@ -461,7 +470,7 @@ Resources:
     UpdateReplacePolicy: Delete
     Properties:
       LogGroupName: !Sub '/aws/network-firewall/${AWS::StackName}/flow'
-      RetentionInDays: 14
+      RetentionInDays: 30
 
   NFWAlertLogGroup:
     Type: AWS::Logs::LogGroup
@@ -469,7 +478,7 @@ Resources:
     UpdateReplacePolicy: Delete
     Properties:
       LogGroupName: !Sub '/aws/network-firewall/${AWS::StackName}/alert'
-      RetentionInDays: 14
+      RetentionInDays: 30
 
   # ============================================================
   # Network Firewall - Logging configuration
@@ -533,8 +542,17 @@ Resources:
   # ============================================================
   # Lambda - Wait for NFW endpoints to be ready, return VPCE IDs per AZ
   # ============================================================
+  NFWEndpointResolverLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-nfw-endpoint-resolver'
+      RetentionInDays: 30
+
   NFWEndpointResolverLambda:
     Type: AWS::Lambda::Function
+    DependsOn: NFWEndpointResolverLogGroup
     Properties:
       FunctionName: !Sub '${AWS::StackName}-nfw-endpoint-resolver'
       Runtime: python3.12
@@ -595,8 +613,17 @@ Resources:
   # ============================================================
   # Lambda - Resolve VPN tunnel parameters (outside IPs, inside CIDRs)
   # ============================================================
+  VPNInfoResolverLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-vpn-info-resolver'
+      RetentionInDays: 30
+
   VPNInfoResolverLambda:
     Type: AWS::Lambda::Function
+    DependsOn: VPNInfoResolverLogGroup
     Properties:
       FunctionName: !Sub '${AWS::StackName}-vpn-info-resolver'
       Runtime: python3.12
@@ -680,8 +707,17 @@ Resources:
   # route whose target is the firewall's endpoint ids, before
   # CFN tries to delete NFWFirewall.
   # ============================================================
+  RouteCleanupLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-route-cleanup'
+      RetentionInDays: 30
+
   RouteCleanupLambda:
     Type: AWS::Lambda::Function
+    DependsOn: RouteCleanupLogGroup
     Properties:
       FunctionName: !Sub '${AWS::StackName}-route-cleanup'
       Runtime: python3.12
@@ -776,8 +812,17 @@ Resources:
   # stack delete we can clean it up.
   # On Delete: the KeyPair gets removed.
   # ============================================================
+  SshMeshKeyGenLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-ssh-mesh-keygen'
+      RetentionInDays: 30
+
   SshMeshKeyGenLambda:
     Type: AWS::Lambda::Function
+    DependsOn: SshMeshKeyGenLogGroup
     Properties:
       FunctionName: !Sub '${AWS::StackName}-ssh-mesh-keygen'
       Runtime: python3.12
