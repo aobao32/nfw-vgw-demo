@@ -1,6 +1,6 @@
 # 使用 AWS Network Firewall 服务审查 IDC 和云上 VPC 间的流量 - VGW 架构的设计
 
-本实验搭建了一个云上 VPC 和 IDC 环境的网络环境，实现 IDC 和云之间的网络流量经 NFW 审查的场景。
+本实验搭建了一个云上 VPC 和 模拟IDC 环境的网络环境，通过开启 BGP 路由传播并手工配置高优先级路由条目，验证 IDC 和云之间的网络流量经 NFW 审查的场景。
 
 全文大量使用的技术术语缩写/简称如下：
 
@@ -13,6 +13,16 @@
 | Direct Connect | DX |
 | CloudFormation | CFN |
 | Virtual Private Gateway | VGW |
+| Border Gateway Protocol | BGP |
+
+在云上创建好的资源名称使用如下简写：
+
+| 全称 | 简称 |
+| --- | --- |
+| Availability Zone | az |
+| Route Table | rt |
+| Private | pvr |
+| Network Firewall | fw |
 
 ## 一、验证 NFW 流量审查部署环境的挑战
 
@@ -56,6 +66,8 @@ IDC 和 云的连接通常是 DX 专线连接，在专线与 VPC 互联时候，
 ### 2、使用 CFN 模板启动实验环境
 
 以上网络架构使用 CFN 模板实现，这里选择 CFN 而不是 AWS CDK，因为 CFN 更加简单，用户无需安装 AWS CDK 等开发包，这对进行网络测试而并非拥有完整 AWS 开发工具的网络用户更加友好。
+
+本项目 CloudFormation 在 Github 地址：[https://github.com/aobao32/nfw-vgw-demo/tree/main/cloudformation](https://github.com/aobao32/nfw-vgw-demo/tree/main/cloudformation)
 
 首先进入 CloudFormation 服务界面，点击创建 Stack，选择上传模板。如下截图。
 

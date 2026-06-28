@@ -4,9 +4,10 @@ Description: >
   VGW and NFW, while a separate VPC (10.0.0.0/16, secondary CIDR 10.132.0.0/16) simulates
   the on-premises IDC. The two VPCs are interconnected via Site-to-Site VPN with BGP and route
   propagation enabled. The simulated IDC runs strongSwan + FRR on an EC2 instance acting as
-  the Customer Gateway (CGW), advertising 10.0.0.0/8 and the inspected subnet 10.132.66.0/24.
-  Routes to IDC CIDRs in the inspection VPC are intentionally left empty, allowing operators
-  to compare BGP auto-propagated routes vs static longest-prefix routes pointing to NFW Endpoints.
+  the Customer Gateway (CGW), advertising the IDC VPC primary CIDR (10.0.0.0/16), the secondary
+  CIDR (10.132.0.0/16), and the inspected subnet 10.132.66.0/24. Routes to IDC CIDRs in the
+  inspection VPC are intentionally left empty, allowing operators to compare BGP auto-propagated
+  routes vs static routes pointing to NFW Endpoints.
 
 Parameters:
   KeyPairName:
@@ -152,8 +153,10 @@ Resources:
           Value: Simulated OnPrem VPC
 
   # Secondary CIDR (10.132.0.0/16) hosts the inspected subnet 10.132.66.0/24,
-  # the specific prefix that operators steer through NFW with a static
-  # longest-prefix route. The wider 10.0.0.0/8 is what BGP propagates.
+  # the specific prefix that operators steer through NFW with a static route.
+  # BGP propagates both the IDC VPC primary CIDR (10.0.0.0/16) and the
+  # secondary CIDR (10.132.0.0/16), so any IDC address is reachable from
+  # the inspection VPC via the VGW path.
   OnPremVPCSecondaryCidr:
     Type: AWS::EC2::VPCCidrBlock
     Properties:
@@ -405,7 +408,15 @@ Resources:
           - 'aws:drop_established'
         StatefulEngineOptions:
           RuleOrder: STRICT_ORDER
-          StreamExceptionPolicy: DROP
+          # 流中断处理策略：REJECT 在丢弃后续报文的同时向客户端回送 TCP RST，
+          # 客户端立即重建会话，新会话可被 NFW 完整跟踪；相比默认 DROP，
+          # 避免了客户端等到 TCP 超时才重连。允许值：DROP | CONTINUE | REJECT。
+          StreamExceptionPolicy: REJECT
+          # 自定义 TCP 空闲超时：连接在该时长内无任何 TCP 报文则视为空闲，
+          # flow 表项被回收，下一个 SYN 会重新走规则匹配。默认 350 秒，
+          # 允许范围 60-6000 秒。
+          FlowTimeouts:
+            TcpIdleTimeoutSeconds: 1230
       Tags:
         - Key: Name
           Value: NFW VGW-DX policy
@@ -431,7 +442,7 @@ Resources:
       DeleteProtection: false
       SubnetChangeProtection: false
       FirewallPolicyChangeProtection: false
-      Description: NFW inspecting VPC <-> simulated DX traffic
+      Description: NFW inspecting traffic between inspection VPC and simulated DX network
       Tags:
         - Key: Name
           Value: Inspection NFW
@@ -471,6 +482,12 @@ Resources:
     Type: AWS::NetworkFirewall::LoggingConfiguration
     Properties:
       FirewallArn: !Ref NFWFirewall
+      # 开启「Firewall monitoring dashboard」（详细监控仪表盘）。该参数默认为 false，
+      # 设为 true 后可在 Network Firewall 控制台的 Monitoring 标签页直接查看基于
+      # FLOW / ALERT 日志的仪表盘。前提：已配置 FLOW 或 ALERT 日志投递到 CloudWatch
+      # 或 S3（本栈已将 FLOW + ALERT 投递到 CloudWatch，前提满足）。
+      # 注意：仪表盘查询 CloudWatch Logs Insights / Athena 会产生额外查询费用。
+      EnableMonitoringDashboard: true
       LoggingConfiguration:
         LogDestinationConfigs:
           - LogType: FLOW
@@ -839,11 +856,11 @@ Resources:
   # ============================================================
   # Inspection VPC route tables - Firewall subnets
   #
-  # These route tables enable VGW route propagation. The on-prem
-  # prefixes (10.0.0.0/8 + 10.132.66.0/24) advertised by FRR over
-  # BGP arrive here as VGW-propagated routes, so the firewall
-  # subnet automatically forwards inspected traffic onward to the
-  # VGW. No static on-prem route is needed here.
+  # These route tables enable VGW route propagation. The on-prem prefixes
+  # (10.0.0.0/16 + 10.132.0.0/16 + 10.132.66.0/24) advertised by FRR over
+  # BGP arrive here as VGW-propagated routes, so the firewall subnet
+  # automatically forwards inspected traffic onward to the VGW. No static
+  # on-prem route is needed here.
   # ============================================================
   FirewallRouteTableAZ1:
     Type: AWS::EC2::RouteTable
@@ -892,19 +909,18 @@ Resources:
   # ============================================================
   # Inspection VPC route tables - Private workload subnets
   #
-  # Default state: VGW route propagation is ENABLED, so on-prem
-  # prefixes (10.0.0.0/8 + 10.132.66.0/24) advertised by FRR over
-  # BGP appear here as VGW-targeted routes and traffic flows
-  # directly through the VGW, BYPASSING NFW. This is intentional:
-  # the experiment first validates a fully working BGP path with
-  # NFW idle, then the operator manually steers traffic through
-  # NFW by adding static, longest-prefix routes that override the
-  # propagated routes:
+  # Default state: VGW route propagation is ENABLED, so on-prem prefixes
+  # (10.0.0.0/16 + 10.132.0.0/16 + 10.132.66.0/24) advertised by FRR over
+  # BGP appear here as VGW-targeted routes and traffic flows directly
+  # through the VGW, BYPASSING NFW. This is intentional: the experiment
+  # first validates a fully working BGP path with NFW idle, then the
+  # operator manually steers traffic through NFW by adding static routes
+  # that override the propagated routes:
   #   prv-rt-az1: 10.132.66.0/24 -> NFW endpoint AZ1
   #   prv-rt-az2: 10.132.66.0/24 -> NFW endpoint AZ2
-  # Static /24 wins over propagated /8 by longest prefix; for the
-  # exact /24 advertised by BGP, longest-prefix is a tie so AWS
-  # prefers the static route over the propagated one.
+  # The /24 advertised by BGP and the manually added /24 share the same
+  # prefix length, and AWS route precedence picks the static route over
+  # the propagated one.
   # ============================================================
   PrivateRouteTableAZ1:
     Type: AWS::EC2::RouteTable
@@ -1290,9 +1306,11 @@ Resources:
 
 
   # ============================================================
-  # strongSwan + FRR EC2 - simulated Customer Gateway device
-  # Two IPSec tunnels to AWS VGW with BGP advertising the on-prem
-  # workload subnet (10.99.10.0/24).
+  # strongSwan + FRR EC2 - simulated Customer Gateway device.
+  # Two IPSec tunnels to AWS VGW, with BGP advertising three on-prem
+  # prefixes: the IDC VPC primary CIDR (10.0.0.0/16), the secondary
+  # CIDR (10.132.0.0/16), and the inspected workload subnet
+  # (10.132.66.0/24).
   # ============================================================
   StrongSwanInstance:
     Type: AWS::EC2::Instance
@@ -1503,8 +1521,14 @@ Resources:
             ip xfrm policy add src 0.0.0.0/0 dst 0.0.0.0/0 dir fwd \\
               tmpl src ${T2OutsideVgw} dst \$LOCAL_IP proto esp reqid 2 mode tunnel mark 0xc8 2>/dev/null || true
 
-            # Blackhole routes so FRR advertises these prefixes via BGP
-            ip route replace blackhole ${BgpAnnounceCidr} metric 250
+            # Blackhole routes so FRR advertises these prefixes via BGP.
+            # Three prefixes match the BGP 'network' statements below:
+            # the IDC VPC primary CIDR, the secondary CIDR, and the
+            # inspected /24 subnet. FRR only announces a 'network' that
+            # has a matching kernel route, so all three blackholes are
+            # required for the three BGP advertisements to actually go out.
+            ip route replace blackhole ${OnPremVpcCidr} metric 250
+            ip route replace blackhole ${OnPremVpcSecondaryCidr} metric 250
             ip route replace blackhole ${OnPremInspectedCidr} metric 250
 
             # More specific kernel routes to actually forward inspected
@@ -1566,7 +1590,8 @@ Resources:
              neighbor ${T2InsideVgw} weight 100
              !
              address-family ipv4 unicast
-              network ${BgpAnnounceCidr}
+              network ${OnPremVpcCidr}
+              network ${OnPremVpcSecondaryCidr}
               network ${OnPremInspectedCidr}
               neighbor ${T1InsideVgw} activate
               neighbor ${T1InsideVgw} soft-reconfiguration inbound
@@ -1669,7 +1694,8 @@ Resources:
             T2Psk: !Ref Tunnel2PreSharedKey
             CustomerBgpAsnRef: !Ref CustomerBgpAsn
             AwsVgwAsnRef: !Ref AwsVgwBgpAsn
-            BgpAnnounceCidr: !FindInMap [Cidr, OnPremVpc, BgpAnnounce]
+            OnPremVpcCidr: !FindInMap [Cidr, OnPremVpc, Vpc]
+            OnPremVpcSecondaryCidr: !FindInMap [Cidr, OnPremVpc, VpcSecondary]
             OnPremInspectedCidr: !FindInMap [Cidr, OnPremVpc, PrivateSubnet]
             InspectionVpcCidr: !FindInMap [Cidr, InspectionVpc, Vpc]
 
